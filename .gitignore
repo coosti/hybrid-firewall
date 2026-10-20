@@ -15,3 +15,6 @@ htmlcov/
 
 .DS_Store
 Thumbs.db
+
+data/samples/*.pcap
+data/samples/*.pcapng
