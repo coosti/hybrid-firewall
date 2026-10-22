@@ -1,11 +1,14 @@
+import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
 
 from scapy.all import PcapReader
 
 from scapy.layers.l2 import Ether
 from scapy.layers.inet import IP, TCP, UDP, ICMP
-from scapy.layers.inet6 import IPv6
+from scapy.layers.inet6 import IPv6, ICMPv6
+
+from firewall.schemas.packet import Packet
 
 # rdpcap for short files
 # PcapReader for big files and to reduce RAM use
@@ -18,9 +21,9 @@ from scapy.layers.inet6 import IPv6
     # for pkt in packets:
         # process each packet individually
         # if pkt.haslayer('IP'):
-            # extract and put in dict...
+            # extract and put in Packet...
 
-def pcap_reader (path: str | Path) -> Iterator[dict[str, Any]]:
+def read_packets(path: str | Path) -> Iterator[Packet]:
 
     path = Path(path)
 
@@ -41,17 +44,6 @@ def pcap_reader (path: str | Path) -> Iterator[dict[str, Any]]:
             fields = {
                 "timestamp": float(pkt.time),
                 "packet_length": len(pkt),
-                "src_mac": None,
-                "dst_mac": None,
-                "ip_version": None,
-                "src_ip": None,
-                "dst_ip": None,
-                "protocol": "OTHER",
-                "src_port": None,
-                "dst_port": None,
-                "tcp_flags": None,
-                "icmp_type": None,
-                "icmp_code": None,
             }
 
             # ethernet info
@@ -67,6 +59,7 @@ def pcap_reader (path: str | Path) -> Iterator[dict[str, Any]]:
                 fields["ip_version"] = 4
                 fields["src_ip"] = ip.src
                 fields["dst_ip"] = ip.dst
+                fields["ip_protocol_number"] = int(ip.proto)
 
             elif pkt.haslayer(IPv6):
                 ip = pkt[IPv6]
@@ -74,29 +67,38 @@ def pcap_reader (path: str | Path) -> Iterator[dict[str, Any]]:
                 fields["ip_version"] = 6
                 fields["src_ip"] = ip.src
                 fields["dst_ip"] = ip.dst
+                fields["ip_protocol_number"] = int(ip.nh)
 
             # transport level info
             if pkt.haslayer(TCP):
                 tcp = pkt[TCP]
 
-                fields["protocol"] = "TCP"
-                fields["src_port"] = tcp.sport
-                fields["dst_port"] = tcp.dport
+                fields["transport_protocol"] = "TCP"
+                fields["src_port"] = int(tcp.sport)
+                fields["dst_port"] = int(tcp.dport)
                 fields["tcp_flags"] = str(tcp.flags)
 
             elif pkt.haslayer(UDP):
                 udp = pkt[UDP]
 
-                fields["protocol"] = "UDP"
-                fields["src_port"] = udp.sport
-                fields["dst_port"] = udp.dport
+                fields["transport_protocol"] = "UDP"
+                fields["src_port"] = int(udp.sport)
+                fields["dst_port"] = int(udp.dport)
 
             elif pkt.haslayer(ICMP):
                 icmp = pkt[ICMP]
 
-                fields["protocol"] = "ICMP"
-                fields["icmp_type"] = icmp.type
-                fields["icmp_code"] = icmp.code
+                fields["transport_protocol"] = "ICMP"
+                fields["icmp_type"] = int(icmp.type)
+                fields["icmp_code"] = int(icmp.code)
 
-            yield fields
+            # check header and extension headers to find ICMPv6
+            elif pkt.haslayer(IPv6):
 
+                icmp6 = pkt[IPv6]
+
+                fields["transport_protocol"] = "ICMPv6"
+                fields["icmp_type"] = int(icmp6.type)
+                fields["icmp_code"] = int(icmp6.code)
+
+            yield Packet(**fields)
