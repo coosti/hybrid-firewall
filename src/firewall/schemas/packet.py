@@ -15,20 +15,41 @@ class Packet:
     timestamp: float
     packet_length: int
 
+    captured_length: int
+
+    # data layer
     src_mac: str | None = None
     dst_mac: str | None = None
 
+    # IP level
     ip_version: IPVersion | None = None
     src_ip: str | None = None
     dst_ip: str | None = None
 
     ip_protocol_number: int | None = None
+
+    ip_header_length: int | None = None
+    ip_total_length: int | None = None  # IPv4
+    ip_payload_length: int | None = None  # IPv6
+
+    # transport level
     transport_protocol: TransportProtocol = "OTHER"
+
+    # TCP
+    tcp_flags: str | None = None
+    tcp_header_length: int | None = None
+    tcp_sequence_number: int | None = None
+    tcp_ack_number: int | None = None
+
+    # UDP
+    udp_length: int | None = None
+
+    # payload
+    payload_length: int | None = None
 
     src_port: int | None = None
     dst_port: int | None = None
 
-    tcp_flags: str | None = None
-
+    # ICMP/ICMPv6
     icmp_type: int | None = None
     icmp_code: int | None = None
