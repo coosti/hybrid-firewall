@@ -26,11 +26,18 @@ class Packet:
     src_ip: str | None = None
     dst_ip: str | None = None
 
-    ip_protocol_number: int | None = None
+    ip_next_header: int | None = None
 
     ip_header_length: int | None = None
     ip_total_length: int | None = None  # IPv4
+    
     ip_payload_length: int | None = None  # IPv6
+    ip_extension_headers_length: int | None = None  # IPv6
+    ip_last_next_header: int | None = None  # IPv6, Next Header of the last extension header
+
+    # IP fragmentation
+    ip_fragment_offset: int | None = None
+    ip_more_fragments: bool | None = None
 
     # transport level
     transport_protocol: TransportProtocol = "OTHER"

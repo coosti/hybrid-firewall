@@ -5,7 +5,8 @@ from scapy.all import PcapReader
 
 from scapy.layers.l2 import Ether
 from scapy.layers.inet import IP, TCP, UDP, ICMP
-from scapy.layers.inet6 import IPv6, ICMPv6, IPv6ExtHdrFragment
+# scapy 2.8 exposes the ICMPv6 base class as _ICMPv6
+from scapy.layers.inet6 import IPv6, _ICMPv6, _IPv6ExtHdr, IPv6ExtHdrFragment
 
 from firewall.schemas.packet import Packet
 
@@ -21,6 +22,41 @@ from firewall.schemas.packet import Packet
         # process each packet individually
         # if pkt.haslayer('IP'):
             # extract and put in Packet...
+
+def payload_length(
+    observed_length: int,
+    ip_payload_available: int | None,
+    transport_header_length: int | None,
+) -> int:
+    # short Ethernet frames are padded after the IP packet
+    if ip_payload_available is None or transport_header_length is None:
+        return observed_length
+
+    declared_payload = ip_payload_available - transport_header_length
+    if declared_payload < 0:
+        return observed_length
+
+    return min(observed_length, declared_payload)
+
+
+def ipv6_extension_headers(ip: IPv6) -> tuple[int, int | None]:
+    # length of the extension headers and the Next Header of the last one
+    # (None when there are no extension headers)
+    length = 0
+    last_next_header = None
+    layer = ip.payload
+
+    while isinstance(layer, _IPv6ExtHdr):
+        length += len(bytes(layer)) - len(bytes(layer.payload))
+
+        # keep the value only when it was actually determined
+        if layer.nh is not None:
+            last_next_header = int(layer.nh)
+
+        layer = layer.payload
+
+    return length, last_next_header
+
 
 def read_packets(path: str | Path) -> Iterator[Packet]:
 
@@ -70,13 +106,16 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 fields["ip_version"] = 4
                 fields["src_ip"] = ip.src
                 fields["dst_ip"] = ip.dst
-                fields["ip_protocol_number"] = int(ip.proto)
+                fields["ip_next_header"] = int(ip.proto)
 
                 if ip.ihl is not None:
                     fields["ip_header_length"] = int(ip.ihl) * 4
 
                 if ip.len is not None:
                     fields["ip_total_length"] = int(ip.len)
+
+                fields["ip_fragment_offset"] = int(ip.frag)
+                fields["ip_more_fragments"] = bool(ip.flags.MF)
 
             # IPv6
             elif pkt.haslayer(IPv6):
@@ -85,13 +124,45 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 fields["ip_version"] = 6
                 fields["src_ip"] = ip.src
                 fields["dst_ip"] = ip.dst
-                fields["ip_protocol_number"] = int(ip.nh)
+                fields["ip_next_header"] = int(ip.nh)
 
                 # 40 bytes for IPv6 header
                 fields["ip_header_length"] = 40
 
                 if ip.plen is not None:
                     fields["ip_payload_length"] = int(ip.plen)
+
+                extension_headers_length, last_next_header = ipv6_extension_headers(ip)
+
+                fields["ip_extension_headers_length"] = extension_headers_length
+                fields["ip_last_next_header"] = last_next_header
+
+                # not fragmented unless a Fragment extension header says otherwise
+                fields["ip_fragment_offset"] = 0
+                fields["ip_more_fragments"] = False
+
+                # fragmentation lives in the Fragment extension header
+                fragment = pkt.getlayer(IPv6ExtHdrFragment)
+                if fragment is not None:
+                    fields["ip_fragment_offset"] = int(fragment.offset)
+                    fields["ip_more_fragments"] = bool(fragment.m)
+
+            # bytes after the base IP header, as declared by the IP layer
+            ip_payload_available = None
+
+            if fields.get("ip_version") == 4:
+                ip_total_length = fields.get("ip_total_length")
+                ip_header_length = fields.get("ip_header_length")
+
+                if ip_total_length is not None and ip_header_length is not None:
+                    ip_payload_available = ip_total_length - ip_header_length
+            
+            elif fields.get("ip_version") == 6:
+                ip_payload_length = fields.get("ip_payload_length")
+                extension_headers_length = fields.get("ip_extension_headers_length") or 0
+
+                if ip_payload_length is not None:
+                    ip_payload_available = ip_payload_length - extension_headers_length
 
             # transport level info
 
@@ -110,7 +181,7 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 fields["tcp_sequence_number"] = int(tcp.seq)
                 fields["tcp_ack_number"] = int(tcp.ack)
 
-                fields["payload_length"] = len(bytes(tcp.payload))
+                fields["payload_length"] = payload_length(len(bytes(tcp.payload)), ip_payload_available, fields.get("tcp_header_length"))
 
             # UDP
             elif pkt.haslayer(UDP):
@@ -123,7 +194,7 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 if udp.len is not None:
                     fields["udp_length"] = int(udp.len)
 
-                fields["payload_length"] = len(bytes(udp.payload))
+                fields["payload_length"] = payload_length(len(bytes(udp.payload)), ip_payload_available, 8)
 
             elif pkt.haslayer(ICMP):
                 icmp = pkt[ICMP]
@@ -132,17 +203,21 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 fields["icmp_type"] = int(icmp.type)
                 fields["icmp_code"] = int(icmp.code)
 
-                fields["payload_length"] = len(bytes(icmp.payload))
+                # ICMP echo id/seq are header fields: count only the bytes
+                # after the common 8-byte ICMP header
+                fields["payload_length"] = payload_length(
+                    max(0, len(bytes(icmp)) - 8), ip_payload_available, 8
+                )
 
-            # check header and extension headers to find ICMPv6
-            elif pkt.haslayer(IPv6):
-
-                icmp6 = pkt[IPv6]
+            # ICMPv6
+            elif (icmp6 := pkt.getlayer(_ICMPv6, _subclass=True)) is not None:
 
                 fields["transport_protocol"] = "ICMPv6"
                 fields["icmp_type"] = int(icmp6.type)
                 fields["icmp_code"] = int(icmp6.code)
 
-                fields["payload_length"] = len(bytes(icmp6.payload))
+                fields["payload_length"] = payload_length(
+                    max(0, len(bytes(icmp6)) - 8), ip_payload_available, 8
+                )
 
             yield Packet(**fields)
