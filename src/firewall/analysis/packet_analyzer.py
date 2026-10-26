@@ -166,7 +166,13 @@ class PacketAnalyzer:
                 code=packet.icmp_code,
             )
 
-        return OtherTransportInfo(protocol_number=packet.ip_next_header)
+        protocol_number = packet.ip_next_header
+
+        if (packet.ip_version == 6 and packet.ip_extension_headers_length is not None and packet.ip_extension_headers_length > 0):
+            # if there are extension header final protocol is last next header
+            protocol_number = packet.ip_last_next_header
+
+        return OtherTransportInfo(protocol_number=protocol_number)
 
     def TCP_FLAGS(self, raw_flags: str | None) -> frozenset[str]:
         if not raw_flags:
@@ -285,9 +291,11 @@ class PacketAnalyzer:
         else:
             source = "declared at IP level"
 
-        return self.compare_payload(payload, expected, self.is_truncated(packet), source)
+        capture_incomplete = (self.is_truncated(packet) or packet.packet_length is None)
 
-    def compare_payload(self, payload: int, expected: int, truncated: bool, source: str) -> CheckResult:
+        return self.compare_payload(payload, expected, capture_incomplete, source)
+
+    def compare_payload(self, payload: int, expected: int, capture_incomplete: bool, source: str) -> CheckResult:
         if expected < 0:
             return CheckResult(CheckStatus.INVALID, "negative IP payload or transport header longer than IP payload")
         
@@ -295,7 +303,7 @@ class PacketAnalyzer:
             return CheckResult(CheckStatus.INVALID, f"payload longer than {source}")
         
         if payload < expected:
-            if truncated:
+            if capture_incomplete:
                 return CheckResult(CheckStatus.INCOMPLETE, "truncated capture")
             
             return CheckResult(CheckStatus.INVALID, f"payload shorter than {source}")
@@ -528,21 +536,17 @@ class PacketAnalyzer:
         offset = packet.ip_fragment_offset
         more_fragments = packet.ip_more_fragments
 
-        if packet.ip_version is None:
+        if packet.ip_version not in (4, 6):
             return CheckResult(CheckStatus.INVALID, "fragmentation fields on a non-IP packet")
 
         if offset is None or more_fragments is None:
             return CheckResult(CheckStatus.INCOMPLETE, "IP fragmentation data not available")
         
-        if not is_int(offset) or offset < 0 or offset > MAX_FRAGMENT_OFFSET:
+        if not is_int(offset) or not 0 <= offset <= MAX_FRAGMENT_OFFSET:
             return CheckResult(CheckStatus.INVALID, f"fragment offset out of range 0-{MAX_FRAGMENT_OFFSET}")
         
         if not isinstance(more_fragments, bool):
             return CheckResult(CheckStatus.INVALID, "ip_more_fragments is not boolean")
-
-        # a non-first fragment carries no transport header
-        if offset > 0 and packet.transport_protocol != "OTHER":
-            return CheckResult(CheckStatus.INVALID, "transport header in a non-first fragment")
 
         return CheckResult(CheckStatus.VALID)
 
@@ -595,27 +599,33 @@ class PacketAnalyzer:
         if header_length is None:
             return CheckResult(CheckStatus.INCOMPLETE, "TCP header length not available")
 
+        if not is_int(header_length) or header_length < 20:
+            return CheckResult(CheckStatus.INVALID, "TCP header shorter than 20 bytes")
+
+        if header_length % 4 != 0:
+            return CheckResult(CheckStatus.INVALID, "TCP header not a multiple of 4")
+
         # an incomplete header cannot be judged, neither valid nor malformed
         if not self.tcp_header_captured(packet, header_length):
             return CheckResult(CheckStatus.INCOMPLETE, "TCP header not fully captured")
-        
-        if not is_int(header_length) or header_length < 20:
-            return CheckResult(CheckStatus.INVALID, "TCP header shorter than 20 bytes")
-        
-        if header_length % 4 != 0:
-            return CheckResult(CheckStatus.INVALID, "TCP header not a multiple of 4")
+
+        if (packet.ip_fragment_offset is not None and packet.ip_fragment_offset > 0):
+            return CheckResult(CheckStatus.INCOMPLETE, "TCP header cannot be verified in a non-first fragment")
 
         ip_payload = self.ip_payload_available(packet)
 
         if ip_payload is not None and ip_payload < 0:
             return CheckResult(CheckStatus.INVALID, "negative IP payload")
-        
+
         if ip_payload is None:
             return CheckResult(CheckStatus.INCOMPLETE, "TCP segment size not determinable")
-        
+
+        if self.is_fragmented(packet):
+            return CheckResult(CheckStatus.INCOMPLETE, "fragmented datagram: TCP header consistency not fully verifiable")
+
         if header_length > ip_payload:
             return CheckResult(CheckStatus.INVALID, "TCP header longer than IP payload")
-        
+
         return CheckResult(CheckStatus.VALID)
 
     def check_uint32(self, value: int | None, label: str) -> CheckResult:
@@ -806,10 +816,10 @@ class PacketAnalyzer:
         
         # an empty payload is a fact only when it is fully determinable:
         # not truncated, not fragmented and the expected length is known
-        if payload == 0 and not self.is_fragmented(packet):
+        if (payload == 0 and not self.is_truncated(packet) and not self.is_fragmented(packet)):
             expected = self.declared_payload_length(packet)
 
-            if expected is not None and expected <= 0:
+            if expected is not None and expected == 0:
                 return frozenset({"EMPTY_PAYLOAD"})
             
         return frozenset()
