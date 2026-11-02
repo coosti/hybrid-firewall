@@ -1,6 +1,6 @@
 from ipaddress import ip_address
-from typing import TypeGuard
 
+from firewall.analysis.util import is_int, tcp_flag_names
 from firewall.schemas.packet import Packet
 from firewall.schemas.packet_analysis import (
     PortRange,
@@ -16,19 +16,6 @@ from firewall.schemas.packet_analysis import (
 )
 
 # --- CONSTANTS ---
-
-# Scapy flag letter -> descriptive name
-TCP_FLAGS = {
-    "F": "FIN",
-    "S": "SYN",
-    "R": "RST",
-    "P": "PSH",
-    "A": "ACK",
-    "U": "URG",
-    "E": "ECE",
-    "C": "CWR",
-    "N": "NS",
-}
 
 # IP protocol number expected for each interpreted transport protocol
 PROTOCOL_NUMBERS = {
@@ -74,10 +61,6 @@ ETHERNET_HEADER_LENGTH = 14
 # ICMP types classified as error messages
 ICMPV4_ERROR_TYPES = {3, 4, 5, 11, 12}
 ICMPV6_ERROR_TYPES = {1, 2, 3, 4}
-
-
-def is_int(value: object) -> TypeGuard[int]:
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def port_range(port: int | None) -> PortRange | None:
@@ -143,7 +126,7 @@ class PacketAnalyzer:
             return TCPInfo(
                 src_port=packet.src_port,
                 dst_port=packet.dst_port,
-                flags=self.TCP_FLAGS(packet.tcp_flags),
+                flags=tcp_flag_names(packet.tcp_flags),
                 header_length=packet.tcp_header_length,
                 sequence_number=packet.tcp_sequence_number,
                 ack_number=packet.tcp_ack_number,
@@ -173,12 +156,6 @@ class PacketAnalyzer:
             protocol_number = packet.ip_last_next_header
 
         return OtherTransportInfo(protocol_number=protocol_number)
-
-    def TCP_FLAGS(self, raw_flags: str | None) -> frozenset[str]:
-        if not raw_flags:
-            return frozenset()
-        
-        return frozenset(TCP_FLAGS[letter] for letter in raw_flags if letter in TCP_FLAGS)
 
     # checks
 
@@ -744,7 +721,7 @@ class PacketAnalyzer:
         return frozenset(characteristics)
 
     def analyze_tcp(self, packet: Packet) -> frozenset[str]:
-        flags = self.TCP_FLAGS(packet.tcp_flags)
+        flags = tcp_flag_names(packet.tcp_flags)
         characteristics: set[str] = set()
 
         if "SYN" in flags:
@@ -844,17 +821,10 @@ class PacketAnalyzer:
     # utilities
 
     def is_truncated(self, packet: Packet) -> bool:
-        return (
-            is_int(packet.captured_length)
-            and is_int(packet.packet_length)
-            and packet.captured_length < packet.packet_length
-        )
+        return (is_int(packet.captured_length) and is_int(packet.packet_length) and packet.captured_length < packet.packet_length)
 
     def is_fragmented(self, packet: Packet) -> bool:
-        return (
-            (packet.ip_fragment_offset is not None and packet.ip_fragment_offset > 0)
-            or packet.ip_more_fragments is True
-        )
+        return ((packet.ip_fragment_offset is not None and packet.ip_fragment_offset > 0) or packet.ip_more_fragments is True)
 
     def tcp_header_captured(self, packet: Packet, header_length: int) -> bool:
         # without Ethernet/IP information the capture cannot be measured
