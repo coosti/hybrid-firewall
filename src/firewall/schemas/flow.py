@@ -13,6 +13,7 @@ class Endpoint:
 @dataclass(frozen=True, slots=True)
 class FlowKey:
     ip_version: IPVersion
+    ip_protocol_number: int
     transport_protocol: TransportProtocol
     endpoint_a: Endpoint
     endpoint_b: Endpoint
