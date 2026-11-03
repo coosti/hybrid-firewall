@@ -53,6 +53,3 @@ class Flow:
     syn_count: int = 0
     fin_count: int = 0
     rst_count: int = 0
-
-    # coherence
-    invalid_timestamps: int = 0

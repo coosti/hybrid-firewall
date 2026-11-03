@@ -45,4 +45,6 @@ class FlowAnalysis:
     rst_count: int
 
     finalization_reason: FinalizationReason
+
+    # packet_count_consistency, byte_count_consistency, duration_validity
     checks: dict[str, CheckResult]

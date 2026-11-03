@@ -1,3 +1,4 @@
+from math import isfinite
 from typing import TypeGuard
 
 # --- SHARED HELPERS ---
@@ -17,6 +18,25 @@ TCP_FLAGS = {
 
 def is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def valid_timestamp(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+
+    if not isinstance(value, (int, float)):
+        return None
+
+    try:
+        timestamp = float(value)
+    except OverflowError:
+        # integers too large for a float
+        return None
+
+    if not isfinite(timestamp) or timestamp < 0:
+        return None
+
+    return timestamp
 
 
 def tcp_flag_names(raw_flags: str | None) -> frozenset[str]:

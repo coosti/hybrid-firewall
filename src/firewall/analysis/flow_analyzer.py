@@ -3,9 +3,10 @@ from ipaddress import ip_address
 from math import isfinite, sqrt
 from typing import Literal
 
-from firewall.analysis.util import is_int, tcp_flag_names
+from firewall.analysis.util import is_int, tcp_flag_names, valid_timestamp
 from firewall.schemas.flow import Endpoint, Flow, FlowKey
 from firewall.schemas.flow_analysis import FinalizationReason, FlowAnalysis
+from firewall.schemas.flow_process_result import FlowExclusionReason, FlowProcessResult
 from firewall.schemas.packet import IPVersion, Packet
 from firewall.schemas.packet_analysis import CheckResult, CheckStatus
 
@@ -45,8 +46,10 @@ def protocol_number(packet: Packet) -> int | None:
     if number is not None:
         return number
 
-    # for OTHER the IP next header distinguishes ESP, fragments, ...
     number = packet.ip_next_header
+
+    if (packet.ip_version == 6 and is_int(packet.ip_extension_headers_length) and packet.ip_extension_headers_length > 0):
+        number = packet.ip_last_next_header
 
     if is_int(number) and 0 <= number <= MAX_PROTOCOL_NUMBER:
         return number
@@ -130,41 +133,36 @@ class FlowAnalyzer:
 
     def __init__(
         self,
-        inactivity_timeout: float = 180.0,
+        inactivity_timeout: float | None = 180.0,
         sweep_interval: float = 60.0,
     ) -> None:
-        
-        if not is_finite_positive(inactivity_timeout):
-            raise ValueError("inactivity_timeout must be a finite positive number")
+
+        if (inactivity_timeout is not None and not is_finite_positive(inactivity_timeout)):
+            raise ValueError("inactivity_timeout must be None or a finite positive number")
 
         if not is_finite_positive(sweep_interval):
             raise ValueError("sweep_interval must be a finite positive number")
 
-        self.inactivity_timeout = inactivity_timeout
+        self.inactivity_timeout: float | None = inactivity_timeout
         self.sweep_interval = sweep_interval
+        self.reset()
 
+    def reset(self) -> None:
         self.active_flows: dict[FlowKey, Flow] = {}
         self.completed: list[FlowAnalysis] = []
         self.next_flow_id = 1
         self.last_sweep: float | None = None
-        self.skipped_packets = 0
         self.last_observed_timestamp: float | None = None
 
     def analyze(self, packets: Iterable[Packet]) -> list[FlowAnalysis]:
 
-        # state reset
-        self.active_flows = {}
-        self.completed = []
-        self.next_flow_id = 1
-        self.last_sweep = None
-        self.skipped_packets = 0
-        self.last_observed_timestamp = None
+        self.reset()
 
         for packet in packets:
             self.process(packet)
 
         self.finalize_all()
-        
+
         return list(self.completed)
 
     def build_key(self, packet: Packet) -> FlowKey | None:
@@ -187,64 +185,58 @@ class FlowAnalyzer:
 
         return None
 
-    def valid_timestamp(self, timestamp: object) -> float | None:
-        if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool):
-            return None
-
-        try:
-            value = float(timestamp)
-        except OverflowError:
-            return None
-
-        if not isfinite(value) or value < 0:
-            return None
-
-        return value
-
     def should_sweep(self, timestamp: float) -> bool:
+        if self.inactivity_timeout is None:
+            return False
+
         return (self.last_sweep is None or timestamp - self.last_sweep >= self.sweep_interval)
 
     def sweep_expired_flows(self, current_timestamp: float) -> None:
+        timeout = self.inactivity_timeout
+
+        if timeout is None:
+            return
 
         expired_keys = [key for key, flow in self.active_flows.items()
-                        if (flow.last_seen is not None and current_timestamp - flow.last_seen >= self.inactivity_timeout)]
+                        if (flow.last_seen is not None and current_timestamp - flow.last_seen >= timeout)]
 
         # only expired keys
         for key in expired_keys:
 
-            self.close_flow(key, FinalizationReason.TIMEOUT, current_timestamp)
+            self._close_flow(key, FinalizationReason.TIMEOUT, current_timestamp)
 
         self.last_sweep = current_timestamp
 
-    def process(self, packet: Packet) -> None:
-        timestamp = self.valid_timestamp(packet.timestamp)
+    def process(self, packet: Packet) -> FlowProcessResult:
+        timestamp = valid_timestamp(packet.timestamp)
 
-        if timestamp is not None:
-            # the global clock advances even for skipped packets
-            if (self.last_observed_timestamp is None or timestamp > self.last_observed_timestamp):
-                self.last_observed_timestamp = timestamp
+        if timestamp is None:
+            return FlowProcessResult(flow_id=None, exclusion_reason=FlowExclusionReason.INVALID_TIMESTAMP)
 
-            if self.should_sweep(timestamp):
-                self.sweep_expired_flows(timestamp)
+        if (self.last_observed_timestamp is not None and timestamp < self.last_observed_timestamp):
+            raise ValueError("packets must be processed in chronological order")
+
+        self.last_observed_timestamp = timestamp
+
+        if self.should_sweep(timestamp):
+            self.sweep_expired_flows(timestamp)
 
         key = self.build_key(packet)
 
         if key is None:
-            self.skipped_packets += 1
-            return
+            return FlowProcessResult(flow_id=None, exclusion_reason=FlowExclusionReason.INVALID_FLOW_KEY)
 
         size = self.packet_size(packet)
-        
+
         if size is None:
-            self.skipped_packets += 1
-            return
+            return FlowProcessResult(flow_id=None, exclusion_reason=FlowExclusionReason.INVALID_PACKET_SIZE)
 
         flow = self.active_flows.get(key)
 
         # separate two instances of the same key expired between two sweeps
-        if (flow is not None and timestamp is not None and flow.last_seen is not None and timestamp - flow.last_seen >= self.inactivity_timeout):
-            self.close_flow(key, FinalizationReason.TIMEOUT, timestamp)
-            
+        if (self.inactivity_timeout is not None and flow is not None and flow.last_seen is not None and timestamp - flow.last_seen >= self.inactivity_timeout):
+            self._close_flow(key, FinalizationReason.TIMEOUT, timestamp)
+
             flow = None
 
         if flow is None:
@@ -253,29 +245,31 @@ class FlowAnalyzer:
 
         self.update_flow(flow, packet, timestamp, size)
 
+        return FlowProcessResult(flow_id=flow.flow_id)
+
     def new_flow(self, key: FlowKey) -> Flow:
+
         flow = Flow(key=key, flow_id=self.next_flow_id)
         self.next_flow_id += 1
+
         return flow
 
     def packet_size(self, packet: Packet) -> int | None:
         size = packet.packet_length
 
-        if not is_int(size) or size < 0:
+        if not is_int(size) or size <= 0:
             return None
 
         return size
 
-    def update_flow(self, flow: Flow, packet: Packet, timestamp: float | None, size: int) -> None:
+    def update_flow(self, flow: Flow, packet: Packet, timestamp: float, size: int) -> None:
         if packet.transport_protocol != flow.key.transport_protocol:
             raise FlowInvariantError("packet protocol does not match the flow protocol")
 
         direction = self.direction(packet, flow.key)
 
         if direction is None:
-            raise FlowInvariantError(
-                "packet source does not match either flow endpoint"
-            )
+            raise FlowInvariantError("packet source does not match either flow endpoint")
 
         flow.packet_count += 1
         flow.byte_count += size
@@ -293,26 +287,21 @@ class FlowAnalyzer:
         if flow.max_packet_size is None or size > flow.max_packet_size:
             flow.max_packet_size = size
 
-        if timestamp is None:
-            flow.invalid_timestamps += 1
-        else:
-            if flow.first_seen is None or timestamp < flow.first_seen:
-                flow.first_seen = timestamp
+        if flow.first_seen is None:
+            flow.first_seen = timestamp
 
-            if flow.last_seen is None or timestamp > flow.last_seen:
-                flow.last_seen = timestamp
+        if flow.previous_timestamp is not None:
+            delta = timestamp - flow.previous_timestamp
 
-            if flow.previous_timestamp is not None:
-                delta = timestamp - flow.previous_timestamp
+            if delta < 0:
+                raise FlowInvariantError("flow timestamps must be non-decreasing")
 
-                if delta >= 0:
-                    flow.interval_count += 1
-                    flow.interval_sum += delta
-                    flow.interval_sq_sum += delta * delta
-                else:
-                    flow.invalid_timestamps += 1
+            flow.interval_count += 1
+            flow.interval_sum += delta
+            flow.interval_sq_sum += delta * delta
 
-            flow.previous_timestamp = timestamp
+        flow.last_seen = timestamp
+        flow.previous_timestamp = timestamp
 
         if flow.key.transport_protocol == "TCP":
             flags = tcp_flag_names(packet.tcp_flags)
@@ -326,7 +315,7 @@ class FlowAnalyzer:
             if "RST" in flags:
                 flow.rst_count += 1
 
-    def finalize_flow(self, flow: Flow, reason: FinalizationReason, finalized_at: float | None) -> None:
+    def _finalize_flow(self, flow: Flow, reason: FinalizationReason, finalized_at: float | None) -> None:
         
         if flow.first_seen is not None and flow.last_seen is not None:
             duration = flow.last_seen - flow.first_seen
@@ -385,31 +374,20 @@ class FlowAnalyzer:
             )
         )
 
-    def close_flow(self, key: FlowKey, reason: FinalizationReason, finalized_at: float | None) -> None:
+    def _close_flow(self, key: FlowKey, reason: FinalizationReason, finalized_at: float | None) -> None:
 
         flow = self.active_flows[key]
 
-        self.finalize_flow(flow, reason, finalized_at)
+        self._finalize_flow(flow, reason, finalized_at)
 
         del self.active_flows[key]
 
     def finalize_all(self) -> None:
         for key in list(self.active_flows):
-            self.close_flow(key, FinalizationReason.END_OF_CAPTURE, self.last_observed_timestamp)
+            self._close_flow(key, FinalizationReason.END_OF_CAPTURE, self.last_observed_timestamp)
 
     def checks(self, flow: Flow, duration: float | None) -> dict[str, CheckResult]:
-        return {"timestamp_validity": self.check_timestamp_validity(flow),
-            "packet_count_consistency": self.check_packet_count(flow),
-            "byte_count_consistency": self.check_byte_count(flow),
-            "duration_validity": self.check_duration(duration),
-        }
-
-    def check_timestamp_validity(self, flow: Flow) -> CheckResult:
-
-        if flow.invalid_timestamps > 0:
-            return CheckResult(CheckStatus.INVALID, f"invalid or out-of-order timestamps: {flow.invalid_timestamps}")
-
-        return CheckResult(CheckStatus.VALID)
+        return {"packet_count_consistency": self.check_packet_count(flow),"byte_count_consistency": self.check_byte_count(flow), "duration_validity": self.check_duration(duration)}
 
     def check_packet_count(self, flow: Flow) -> CheckResult:
         directional = flow.packets_a_to_b + flow.packets_b_to_a

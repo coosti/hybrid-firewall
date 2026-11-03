@@ -1,6 +1,6 @@
 from ipaddress import ip_address
 
-from firewall.analysis.util import is_int, tcp_flag_names
+from firewall.analysis.util import is_int, tcp_flag_names, valid_timestamp
 from firewall.schemas.packet import Packet
 from firewall.schemas.packet_analysis import (
     PortRange,
@@ -182,20 +182,23 @@ class PacketAnalyzer:
 
         if timestamp is None:
             return CheckResult(CheckStatus.INCOMPLETE, "timestamp not available")
-        
+
+        if valid_timestamp(timestamp) is not None:
+            return CheckResult(CheckStatus.VALID)
+
         if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool):
             return CheckResult(CheckStatus.INVALID, "invalid timestamp")
-        
+
         if timestamp != timestamp:
             return CheckResult(CheckStatus.INVALID, "NaN timestamp")
-        
+
         if timestamp in (float("inf"), float("-inf")):
             return CheckResult(CheckStatus.INVALID, "infinite timestamp")
-        
+
         if timestamp < 0:
             return CheckResult(CheckStatus.INVALID, "negative timestamp")
-        
-        return CheckResult(CheckStatus.VALID)
+
+        return CheckResult(CheckStatus.INVALID, "timestamp out of range")
 
     def check_packet_length(self, packet: Packet) -> CheckResult:
         captured = packet.captured_length
