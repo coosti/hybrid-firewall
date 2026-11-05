@@ -151,9 +151,14 @@ class PacketAnalyzer:
 
         protocol_number = packet.ip_next_header
 
-        if (packet.ip_version == 6 and packet.ip_extension_headers_length is not None and packet.ip_extension_headers_length > 0):
-            # if there are extension header final protocol is last next header
-            protocol_number = packet.ip_last_next_header
+        if packet.ip_version == 6:
+            extension_length = packet.ip_extension_headers_length
+            if extension_length is not None:
+                if not is_int(extension_length) or extension_length < 0:
+                    # Malformed metadata cannot identify the final protocol.
+                    protocol_number = None
+                elif extension_length > 0:
+                    protocol_number = packet.ip_last_next_header
 
         return OtherTransportInfo(protocol_number=protocol_number)
 
@@ -589,7 +594,7 @@ class PacketAnalyzer:
         if not self.tcp_header_captured(packet, header_length):
             return CheckResult(CheckStatus.INCOMPLETE, "TCP header not fully captured")
 
-        if (packet.ip_fragment_offset is not None and packet.ip_fragment_offset > 0):
+        if (is_int(packet.ip_fragment_offset) and packet.ip_fragment_offset > 0):
             return CheckResult(CheckStatus.INCOMPLETE, "TCP header cannot be verified in a non-first fragment")
 
         ip_payload = self.ip_payload_available(packet)
@@ -827,7 +832,7 @@ class PacketAnalyzer:
         return (is_int(packet.captured_length) and is_int(packet.packet_length) and packet.captured_length < packet.packet_length)
 
     def is_fragmented(self, packet: Packet) -> bool:
-        return ((packet.ip_fragment_offset is not None and packet.ip_fragment_offset > 0) or packet.ip_more_fragments is True)
+        return ((is_int(packet.ip_fragment_offset) and packet.ip_fragment_offset > 0) or packet.ip_more_fragments is True)
 
     def tcp_header_captured(self, packet: Packet, header_length: int) -> bool:
         # without Ethernet/IP information the capture cannot be measured
