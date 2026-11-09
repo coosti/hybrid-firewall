@@ -19,3 +19,5 @@ Thumbs.db
 data/samples/
 data/tests/
 data/analyzer_tests/
+
+tests/

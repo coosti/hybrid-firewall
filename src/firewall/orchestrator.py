@@ -1,12 +1,18 @@
 from collections.abc import Iterable
+from pathlib import Path
 
 from firewall.analysis.flow_analyzer import FlowAnalyzer
 from firewall.analysis.packet_analyzer import PacketAnalyzer
 from firewall.analysis.util import valid_timestamp
+from firewall.engine.policy_engine import PolicyEngine
+from firewall.engine.policy_config import PolicyConfig
 from firewall.schemas.capture_analysis import CaptureAnalysis
 from firewall.schemas.flow_process_result import FlowExclusionReason, FlowProcessResult
 from firewall.schemas.indexed_packet import IndexedPacket
 from firewall.schemas.packet import Packet
+from firewall.engine.policy_decision import PolicyDecision
+from reporting.report import export_report, print_decisions, print_summary
+from tools.pcap_reader import read_packets
 
 # firewall core
 # it manages filtering pipeline:
@@ -65,3 +71,28 @@ def analyze_capture(packets: Iterable[Packet], packet_analyzer: PacketAnalyzer, 
     flows = {analysis.flow_id: analysis for analysis in flow_analyzer.completed}
 
     return CaptureAnalysis(packets=tuple(original_packets), packet_analyses=packet_analyses, flow_results=flow_results, flows=flows)
+
+
+# --- POLICY EVALUATION ---
+
+def evaluate_capture(capture: CaptureAnalysis, policy_engine: PolicyEngine) -> dict[int, PolicyDecision]:
+    # decisions are separate from analysis: capture is never modified
+    return policy_engine.evaluate(capture)
+
+
+# --- COMPLETE CAPTURE PIPELINE ---
+
+def run_capture(pcap_path: str | Path, config: PolicyConfig, output_path: str | Path | None = None) -> tuple[CaptureAnalysis, dict[int, PolicyDecision]]:
+    # never overwrite the input capture with the optional report
+    if output_path is not None and Path(output_path).resolve() == Path(pcap_path).resolve():
+        raise ValueError("JSON output must differ from the input capture")
+
+    capture = analyze_capture(read_packets(pcap_path), PacketAnalyzer(), FlowAnalyzer())
+    decisions = evaluate_capture(capture, PolicyEngine(config))
+
+    print_decisions(decisions)
+    print_summary(capture, decisions)
+    if output_path is not None:
+        export_report(capture, decisions, output_path)
+
+    return capture, decisions
