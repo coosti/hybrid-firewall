@@ -221,6 +221,13 @@ class FlowAnalyzer:
         if self.should_sweep(timestamp):
             self.sweep_expired_flows(timestamp)
 
+        # no transport attribution or fragment correlation without reassembly
+        if is_int(packet.ip_fragment_offset) and packet.ip_fragment_offset > 0:
+            return FlowProcessResult(flow_id=None, exclusion_reason=FlowExclusionReason.NON_INITIAL_FRAGMENT)
+
+        if (packet.ip_more_fragments is True and packet.transport_protocol == "OTHER" and protocol_number(packet) in (6, 17)):
+            return FlowProcessResult(flow_id=None, exclusion_reason=FlowExclusionReason.INVALID_FLOW_KEY)
+
         key = self.build_key(packet)
 
         if key is None:

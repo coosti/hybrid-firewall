@@ -53,6 +53,10 @@ def ipv6_extension_headers(ip: IPv6) -> tuple[int, int | None]:
         if layer.nh is not None:
             last_next_header = int(layer.nh)
 
+        if isinstance(layer, IPv6ExtHdrFragment) and layer.offset > 0:
+            # later fragment bytes cannot be interpreted as another header chain
+            break
+
         layer = layer.payload
 
     return length, last_next_header
@@ -140,12 +144,26 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 # not fragmented unless a Fragment extension header says otherwise
                 fields["ip_fragment_offset"] = 0
                 fields["ip_more_fragments"] = False
+                fields["ip_fragment_header_present"] = False
 
                 # fragmentation lives in the Fragment extension header
-                fragment = pkt.getlayer(IPv6ExtHdrFragment)
-                if fragment is not None:
+                fragment = ip.payload
+                while isinstance(fragment, _IPv6ExtHdr) and not isinstance(fragment, IPv6ExtHdrFragment):
+                    fragment = fragment.payload
+                if isinstance(fragment, IPv6ExtHdrFragment):
+                    fields["ip_fragment_header_present"] = True
                     fields["ip_fragment_offset"] = int(fragment.offset)
                     fields["ip_more_fragments"] = bool(fragment.m)
+                elif last_next_header == 44 or fields["ip_next_header"] == 44:
+                    # Fragment header announced but not available in the capture
+                    fields["ip_fragment_header_present"] = None
+                    fields["ip_fragment_offset"] = None
+                    fields["ip_more_fragments"] = None
+
+            if (fields.get("ip_fragment_offset") or 0) > 0:
+                # never extract transport fields from non-initial fragment bytes
+                yield Packet(**fields)
+                continue
 
             # bytes after the base IP header, as declared by the IP layer
             ip_payload_available = None

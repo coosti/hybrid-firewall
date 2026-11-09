@@ -119,6 +119,7 @@ class PacketAnalyzer:
             ip_last_next_header=packet.ip_last_next_header,
             ip_fragment_offset=packet.ip_fragment_offset,
             ip_more_fragments=packet.ip_more_fragments,
+            ip_fragment_header_present=packet.ip_fragment_header_present,
         )
 
     def transport_info(self, packet: Packet) -> TCPInfo | UDPInfo | ICMPInfo | OtherTransportInfo | None:
@@ -366,6 +367,7 @@ class PacketAnalyzer:
         if (packet.ip_version is not None
             or packet.ip_fragment_offset is not None
             or packet.ip_more_fragments is not None
+            or packet.ip_fragment_header_present is not None
         ):
             checks["ip_fragmentation_consistency"] = self.check_ip_fragmentation(packet)
 
@@ -520,6 +522,12 @@ class PacketAnalyzer:
     def check_ip_fragmentation(self, packet: Packet) -> CheckResult:
         offset = packet.ip_fragment_offset
         more_fragments = packet.ip_more_fragments
+        present = packet.ip_fragment_header_present
+
+        if present is not None and not isinstance(present, bool):
+            return CheckResult(CheckStatus.INVALID, "Fragment header presence is not boolean")
+        if present is True and packet.ip_version != 6:
+            return CheckResult(CheckStatus.INVALID, "IPv6 Fragment header on a non-IPv6 packet")
 
         if packet.ip_version not in (4, 6):
             return CheckResult(CheckStatus.INVALID, "fragmentation fields on a non-IP packet")
@@ -532,6 +540,9 @@ class PacketAnalyzer:
         
         if not isinstance(more_fragments, bool):
             return CheckResult(CheckStatus.INVALID, "ip_more_fragments is not boolean")
+
+        if packet.ip_version == 6 and present is False and (offset > 0 or more_fragments):
+            return CheckResult(CheckStatus.INVALID, "fragmentation contradicts absent IPv6 Fragment header")
 
         return CheckResult(CheckStatus.VALID)
 
@@ -816,10 +827,15 @@ class PacketAnalyzer:
         return frozenset()
 
     def fragmentation_characteristics(self, packet: Packet) -> frozenset[str]:
+        if (packet.ip_version == 6 and packet.ip_fragment_header_present is True and is_int(packet.ip_fragment_offset) and packet.ip_fragment_offset == 0 and packet.ip_more_fragments is False):
+            return frozenset({"IPV6_ATOMIC_FRAGMENT"})
+
         if not self.is_fragmented(packet):
             return frozenset()
         
         characteristics = {"FRAGMENTED_PACKET"}
+        if is_int(packet.ip_fragment_offset) and packet.ip_fragment_offset >= 0:
+            characteristics.add("INITIAL_FRAGMENT" if packet.ip_fragment_offset == 0 else "NON_INITIAL_FRAGMENT")
 
         if packet.transport_protocol in ("ICMP", "ICMPv6"):
             characteristics.add("FRAGMENTED_ICMP")

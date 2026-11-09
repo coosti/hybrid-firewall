@@ -120,6 +120,13 @@ def export_report(capture: CaptureAnalysis, decisions: Mapping[int, PolicyDecisi
             "packet_diagnostics": {key: {"status": check.status, "reason": check.reason}
                                     for key, check in analysis.checks.items() if check.status in diagnostic_statuses},
             "flow_exclusion_reason": result.exclusion_reason,
+            "fragmentation": {
+                "characteristics": sorted(analysis.characteristics & {
+                    "FRAGMENTED_PACKET", "INITIAL_FRAGMENT", "NON_INITIAL_FRAGMENT", "IPV6_ATOMIC_FRAGMENT"}),
+                "offset": analysis.network.ip_fragment_offset,
+                "more_fragments": analysis.network.ip_more_fragments,
+                "ipv6_fragment_header_present": analysis.network.ip_fragment_header_present,
+            } if analysis.network.ip_version in (4, 6) else None,
         })
 
     report = {"summary": capture_summary(capture, decisions), "decision_semantics": {"flow": "retrospective", "window": "current_event"}, "packets": packets}

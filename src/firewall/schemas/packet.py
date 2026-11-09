@@ -38,6 +38,7 @@ class Packet:
     # IP fragmentation
     ip_fragment_offset: int | None = None
     ip_more_fragments: bool | None = None
+    ip_fragment_header_present: bool | None = None  # IPv6 Fragment header, including atomic packets
 
     # transport level
     transport_protocol: TransportProtocol = "OTHER"

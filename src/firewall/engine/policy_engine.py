@@ -675,8 +675,14 @@ class PolicyEngine:
         if analysis.network.ip_version in (4, 6):
             status = check_status(analysis, "ip_fragmentation_consistency")
 
-            if status in (None, CheckStatus.INCOMPLETE, CheckStatus.NOT_CHECKED):
+            if status not in (CheckStatus.VALID, CheckStatus.INVALID):
                 unevaluated.append(IP_FRAGMENT)
+                findings.append(_Finding(IP_FRAGMENT, "fragmentation_unverifiable", PolicyScope.PACKET,
+                                {"check": "ip_fragmentation_consistency", "status": status.value if status is not None else None}))
+                
+            elif status == CheckStatus.INVALID:
+                findings.append(_Finding(IP_FRAGMENT, "fragmentation_invalid", PolicyScope.PACKET,
+                                {"check": "ip_fragmentation_consistency", "status": status.value}))
 
     def port_rules(self, analysis: PacketAnalysis, findings: list[_Finding], unevaluated: list[str]) -> None:
         ports = self.transport_ports(analysis)
@@ -1070,6 +1076,8 @@ class PolicyEngine:
         return None, unevaluated
 
     def authorization_fields(self, analysis: PacketAnalysis) -> tuple[str, str, int | None, int | None, tuple[int, int] | None] | None:
+        if "NON_INITIAL_FRAGMENT" in analysis.characteristics:
+            return None
         for key in AUTHORIZATION_CHECKS:
             if not check_valid(analysis, key):
                 return None
