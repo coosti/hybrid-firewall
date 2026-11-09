@@ -93,6 +93,7 @@ WINDOW_SMALL_PACKETS = "WINDOW_SMALL_PACKETS"
 
 DEFAULT_DENY = "DEFAULT_DENY"
 INVALID_TIMESTAMP = "INVALID_TIMESTAMP"
+UNSUPPORTED_TUNNEL = "UNSUPPORTED_TUNNEL"
 
 WindowKey = tuple[str, str, int]
 
@@ -571,6 +572,10 @@ class PolicyEngine:
         )
 
     def packet_rules(self, packet: Packet, analysis: PacketAnalysis, findings: list[_Finding], unevaluated: list[str],) -> None:
+        if "IP_ENCAPSULATION" in analysis.characteristics:
+            # unsupported outer tunnels cannot inherit an inner service or OTHER permission
+            findings.append(_Finding(UNSUPPORTED_TUNNEL, "unsupported_ip_tunnel", PolicyScope.PACKET,
+                            {"protocol_number": protocol_number(analysis)}))
         
         self.ip_rules(analysis, findings, unevaluated)
         self.structural_rules(analysis, findings, unevaluated)

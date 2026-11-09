@@ -61,3 +61,4 @@ class Packet:
     # ICMP/ICMPv6
     icmp_type: int | None = None
     icmp_code: int | None = None
+    link_header_length: int | None = None  # observed bytes before the outer IP header

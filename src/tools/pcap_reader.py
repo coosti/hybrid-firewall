@@ -62,6 +62,17 @@ def ipv6_extension_headers(ip: IPv6) -> tuple[int, int | None]:
     return length, last_next_header
 
 
+def outer_ip(packet) -> tuple[IP | IPv6 | None, int | None]:
+    layer = packet
+    link_length = 0
+    while layer:
+        if isinstance(layer, (IP, IPv6)):
+            return layer, link_length
+        link_length += len(bytes(layer)) - len(bytes(layer.payload))
+        layer = layer.payload
+    return None, None
+
+
 def read_packets(path: str | Path) -> Iterator[Packet]:
 
     path = Path(path)
@@ -96,16 +107,17 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
             }
 
             # ethernet info
-            if pkt.haslayer(Ether):
-                eth = pkt[Ether]
+            if isinstance(pkt, Ether):
+                eth = pkt
                 fields["src_mac"] = eth.src
                 fields["dst_mac"] = eth.dst
 
             # IP info
+            ip, link_length = outer_ip(pkt)
+            fields["link_header_length"] = link_length
 
             # IPv4
-            if pkt.haslayer(IP):
-                ip = pkt[IP]
+            if isinstance(ip, IP):
 
                 fields["ip_version"] = 4
                 fields["src_ip"] = ip.src
@@ -122,8 +134,7 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 fields["ip_more_fragments"] = bool(ip.flags.MF)
 
             # IPv6
-            elif pkt.haslayer(IPv6):
-                ip = pkt[IPv6]
+            elif isinstance(ip, IPv6):
 
                 fields["ip_version"] = 6
                 fields["src_ip"] = ip.src
@@ -183,10 +194,14 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                     ip_payload_available = ip_payload_length - extension_headers_length
 
             # transport level info
+            transport = ip.payload if ip is not None else None
+            if isinstance(ip, IPv6):
+                while isinstance(transport, _IPv6ExtHdr):
+                    transport = transport.payload
 
             # TCP
-            if pkt.haslayer(TCP):
-                tcp = pkt[TCP]
+            if isinstance(transport, TCP):
+                tcp = transport
 
                 fields["transport_protocol"] = "TCP"
                 fields["src_port"] = int(tcp.sport)
@@ -202,8 +217,8 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 fields["payload_length"] = payload_length(len(bytes(tcp.payload)), ip_payload_available, fields.get("tcp_header_length"))
 
             # UDP
-            elif pkt.haslayer(UDP):
-                udp = pkt[UDP]
+            elif isinstance(transport, UDP):
+                udp = transport
 
                 fields["transport_protocol"] = "UDP"
                 fields["src_port"] = int(udp.sport)
@@ -214,8 +229,8 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
 
                 fields["payload_length"] = payload_length(len(bytes(udp.payload)), ip_payload_available, 8)
 
-            elif pkt.haslayer(ICMP):
-                icmp = pkt[ICMP]
+            elif isinstance(transport, ICMP):
+                icmp = transport
 
                 fields["transport_protocol"] = "ICMP"
                 fields["icmp_type"] = int(icmp.type)
@@ -228,7 +243,8 @@ def read_packets(path: str | Path) -> Iterator[Packet]:
                 )
 
             # ICMPv6
-            elif (icmp6 := pkt.getlayer(_ICMPv6, _subclass=True)) is not None:
+            elif isinstance(transport, _ICMPv6):
+                icmp6 = transport
 
                 fields["transport_protocol"] = "ICMPv6"
                 fields["icmp_type"] = int(icmp6.type)

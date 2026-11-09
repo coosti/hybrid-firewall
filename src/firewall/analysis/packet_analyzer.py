@@ -106,6 +106,7 @@ class PacketAnalyzer:
 
     def network_info(self, packet: Packet) -> NetworkInfo:
         return NetworkInfo(
+            link_header_length=packet.link_header_length,
             src_mac=packet.src_mac,
             dst_mac=packet.dst_mac,
             ip_version=packet.ip_version,
@@ -229,6 +230,23 @@ class PacketAnalyzer:
 
                 if packet.ip_total_length > original:
                     return CheckResult(CheckStatus.INVALID, "ip_total_length exceeds packet length")
+
+        if packet.ip_version == 6:
+            payload = packet.ip_payload_length
+            link_length = packet.link_header_length
+            if payload is None:
+                return CheckResult(CheckStatus.INCOMPLETE, "IPv6 payload length unavailable")
+            if not is_int(payload) or not 0 <= payload <= 65535:
+                return CheckResult(CheckStatus.INVALID, "invalid IPv6 payload length")
+            if link_length is None:
+                return CheckResult(CheckStatus.INCOMPLETE, "link header length unavailable")
+            if not is_int(link_length) or link_length < 0:
+                return CheckResult(CheckStatus.INVALID, "invalid link header length")
+            declared_length = link_length + 40 + payload
+            if original is not None and declared_length > original:
+                return CheckResult(CheckStatus.INVALID, "declared IPv6 length exceeds original frame length")
+            if declared_length > captured:
+                return CheckResult(CheckStatus.INCOMPLETE, "IPv6 packet not fully captured")
 
         # a negative IP payload means the declared lengths contradict each other
         ip_payload = self.ip_payload_available(packet)
@@ -721,6 +739,13 @@ class PacketAnalyzer:
 
     def characteristics(self, packet: Packet) -> frozenset[str]:
         characteristics: set[str] = set()
+        number = packet.ip_next_header
+        
+        if packet.ip_version == 6 and is_int(packet.ip_extension_headers_length) and packet.ip_extension_headers_length > 0:
+            number = packet.ip_last_next_header
+
+        if number in (4, 41, 47):
+            characteristics.add("IP_ENCAPSULATION")
 
         if packet.transport_protocol == "TCP":
             characteristics.update(self.analyze_tcp(packet))

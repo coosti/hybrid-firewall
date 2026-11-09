@@ -43,6 +43,16 @@ ICMP_PROTOCOLS = frozenset({"ICMP", "ICMPv6"})
 MAX_PORT = 65535
 MAX_ICMP_FIELD = 255
 
+# fixed engine identifiers and generated namespaces are not user rule IDs
+RESERVED_RULE_IDS = frozenset({
+    "SOURCE_ADDRESS_RESTRICTION", "BOUNDARY_SOURCE_RESTRICTION", "IP_FRAGMENT",
+    "TCP_SYN_FIN", "TCP_SYN_RST", "TCP_NULL_FLAGS", "L3_SIZE_LIMIT",
+    "FLOW_PACKET_RATE", "FLOW_BYTE_RATE", "FLOW_DURATION", "FLOW_BYTE_COUNT",
+    "WINDOW_PACKET_FLOOD", "WINDOW_SYN_FLOOD", "WINDOW_ECHO_FLOOD",
+    "WINDOW_PORT_SCAN", "WINDOW_UDP_PORT_SCAN", "WINDOW_HOST_SCAN", "WINDOW_SMALL_PACKETS",
+    "DEFAULT_DENY", "INVALID_TIMESTAMP", "UNSUPPORTED_TUNNEL",
+})
+
 
 class CaptureContext(StrEnum):
     UNKNOWN = "UNKNOWN"
@@ -259,9 +269,16 @@ def validate_pair(window: object, maximum: object, window_label: str, maximum_la
     validate_count(maximum, maximum_label, minimum=maximum_minimum)
 
 
+def validate_rule_id(rule_id: str) -> None:
+    if not isinstance(rule_id, str) or not rule_id:
+        raise ValueError("rule ID must be a non-empty string")
+    
+    if rule_id in RESERVED_RULE_IDS or rule_id.startswith(("required.", "structural.")):
+        raise ValueError(f"reserved rule ID: {rule_id}")
+
+
 def validate_service_rule(rule: ServiceRule) -> None:
-    if not isinstance(rule.rule_id, str) or not rule.rule_id:
-        raise ValueError("service rule ID must be a non-empty string")
+    validate_rule_id(rule.rule_id)
 
     if rule.protocol not in SERVICE_PROTOCOLS:
         raise ValueError(f"{rule.rule_id}: unsupported service protocol {rule.protocol}")
@@ -320,8 +337,7 @@ def validate_service_rule(rule: ServiceRule) -> None:
 
 
 def validate_port_restriction(restriction: PortRestriction) -> None:
-    if not isinstance(restriction.rule_id, str) or not restriction.rule_id:
-        raise ValueError("port restriction ID must be a non-empty string")
+    validate_rule_id(restriction.rule_id)
 
     if restriction.protocol not in PORT_PROTOCOLS:
         raise ValueError(f"{restriction.rule_id}: port restrictions require TCP or UDP")
@@ -331,8 +347,7 @@ def validate_port_restriction(restriction: PortRestriction) -> None:
 
 
 def validate_ip_restriction(restriction: IPRestriction) -> None:
-    if not isinstance(restriction.rule_id, str) or not restriction.rule_id:
-        raise ValueError("IP restriction ID must be a non-empty string")
+    validate_rule_id(restriction.rule_id)
 
     parse_networks((restriction.network,), f"{restriction.rule_id}.network")
 
@@ -394,12 +409,13 @@ def validate_policy_config(config: PolicyConfig) -> None:
         if not isinstance(rule, ServiceRule):
             raise ValueError("service_rules must contain ServiceRule objects")
 
+        validate_service_rule(rule)
+
         if rule.rule_id in service_rule_ids:
             raise ValueError(f"duplicate rule ID: {rule.rule_id}")
 
         service_rule_ids.add(rule.rule_id)
         service_rules[rule.rule_id] = rule
-        validate_service_rule(rule)
 
     port_rule_ids: set[str] = set()
 
@@ -410,11 +426,12 @@ def validate_policy_config(config: PolicyConfig) -> None:
         if not isinstance(restriction, PortRestriction):
             raise ValueError("port restrictions must contain PortRestriction objects")
 
+        validate_port_restriction(restriction)
+
         if restriction.rule_id in port_rule_ids:
             raise ValueError(f"duplicate rule ID: {restriction.rule_id}")
 
         port_rule_ids.add(restriction.rule_id)
-        validate_port_restriction(restriction)
 
     ip_rule_ids: set[str] = set()
 
@@ -425,11 +442,12 @@ def validate_policy_config(config: PolicyConfig) -> None:
         if not isinstance(restriction, IPRestriction):
             raise ValueError("blocked_networks must contain IPRestriction objects")
 
+        validate_ip_restriction(restriction)
+
         if restriction.rule_id in ip_rule_ids:
             raise ValueError(f"duplicate rule ID: {restriction.rule_id}")
 
         ip_rule_ids.add(restriction.rule_id)
-        validate_ip_restriction(restriction)
 
     if not isinstance(config.required_checks, tuple):
         raise ValueError("required_checks must be a tuple")
@@ -478,8 +496,7 @@ def validate_policy_config(config: PolicyConfig) -> None:
     for rule in config.flow_limit_rules:
         if not isinstance(rule, FlowLimitRule):
             raise ValueError("flow_limit_rules must contain FlowLimitRule objects")
-        if not isinstance(rule.rule_id, str) or not rule.rule_id:
-            raise ValueError("flow limit rule ID must be a non-empty string")
+        validate_rule_id(rule.rule_id)
         if not isinstance(rule.limits, FlowLimits):
             raise ValueError(f"{rule.rule_id}: limits must be a FlowLimits")
         if rule.protocol is not None and (not isinstance(rule.protocol, str) or rule.protocol not in SERVICE_PROTOCOLS):

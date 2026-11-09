@@ -54,6 +54,7 @@ class NetworkInfo:
     ip_fragment_offset: int | None = None  # 8-byte units
     ip_more_fragments: bool | None = None
     ip_fragment_header_present: bool | None = None  # IPv6
+    link_header_length: int | None = None
 
 # --- TRANSPORT LEVEL ---
 
