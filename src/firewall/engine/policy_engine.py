@@ -15,6 +15,7 @@ from firewall.engine.policy_config import (
 
 from firewall.schemas.capture_analysis import CaptureAnalysis
 from firewall.schemas.flow_analysis import FlowAnalysis
+from firewall.schemas.flow import TCPState
 from firewall.schemas.indexed_packet import IndexedPacket
 from firewall.schemas.packet import Packet
 from firewall.schemas.packet_analysis import (
@@ -75,6 +76,8 @@ IP_FRAGMENT = "IP_FRAGMENT"
 TCP_SYN_FIN = "TCP_SYN_FIN"
 TCP_SYN_RST = "TCP_SYN_RST"
 TCP_NULL_FLAGS = "TCP_NULL_FLAGS"
+TCP_HANDSHAKE_INCOMPLETE = "TCP_HANDSHAKE_INCOMPLETE"
+TCP_STATE_ANOMALY = "TCP_STATE_ANOMALY"
 
 L3_SIZE_LIMIT = "L3_SIZE_LIMIT"
 
@@ -404,6 +407,23 @@ class PolicyEngine:
         unevaluated: list[str] = []
 
         self.apply_flow_limits(flow, self.config.flow_limits, findings, unevaluated)
+
+        if flow.key.transport_protocol == "TCP":
+            evidence = {"tcp_state": flow.tcp_state.value,
+                        "handshake_observed": flow.handshake_observed,
+                        "tcp_reset_observed": flow.tcp_reset_observed,
+                        "tcp_state_anomalies": flow.tcp_state_anomalies}
+            if (flow.tcp_state in (TCPState.SYN_SENT, TCPState.SYN_ACK_SEEN)
+                    and not flow.handshake_observed and not flow.tcp_reset_observed):
+                findings.append(_Finding(TCP_HANDSHAKE_INCOMPLETE,
+                    "tcp_handshake_not_fully_observed", PolicyScope.FLOW, evidence, blocking=False))
+            elif flow.tcp_state in (TCPState.NEW, TCPState.UNKNOWN):
+                unevaluated.append(TCP_HANDSHAKE_INCOMPLETE)
+            if flow.tcp_state_anomalies:
+                findings.append(_Finding(TCP_STATE_ANOMALY,
+                    "tcp_syn_ack_in_initiator_direction", PolicyScope.FLOW, evidence, blocking=False))
+            elif flow.tcp_state in (TCPState.NEW, TCPState.UNKNOWN):
+                unevaluated.append(TCP_STATE_ANOMALY)
 
         for rule in self.config.flow_limit_rules:
             if rule.protocol is not None and rule.protocol != flow.key.transport_protocol:

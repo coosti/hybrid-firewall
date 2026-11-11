@@ -231,6 +231,19 @@ class PacketAnalyzer:
                 if packet.ip_total_length > original:
                     return CheckResult(CheckStatus.INVALID, "ip_total_length exceeds packet length")
 
+        if packet.ip_version == 4 and packet.ip_total_length is not None:
+            if not is_int(packet.ip_total_length):
+                return CheckResult(CheckStatus.INVALID, "invalid ip_total_length")
+            link_length = packet.link_header_length
+            if link_length is not None:
+                if not is_int(link_length) or link_length < 0:
+                    return CheckResult(CheckStatus.INVALID, "invalid link header length")
+                declared_length = link_length + packet.ip_total_length
+                if original is not None and declared_length > original:
+                    return CheckResult(CheckStatus.INVALID, "declared IPv4 length exceeds original frame length")
+                if declared_length > captured:
+                    return CheckResult(CheckStatus.INCOMPLETE, "IPv4 packet not fully captured")
+
         if packet.ip_version == 6:
             payload = packet.ip_payload_length
             link_length = packet.link_header_length
@@ -255,6 +268,16 @@ class PacketAnalyzer:
                 return CheckResult(CheckStatus.INVALID, "IPv6 payload smaller than extension headers")
             
             return CheckResult(CheckStatus.INVALID, "ip_total_length smaller than the IP header")
+
+        # The declared protocol needs room for its header even when the reader
+        # cannot decode transport fields. Ethernet padding is not IP payload.
+        if (packet.ip_version == 4
+            and is_int(packet.ip_next_header) and packet.ip_next_header == 17
+            and is_int(packet.ip_fragment_offset) and packet.ip_fragment_offset == 0
+            and packet.ip_more_fragments is False
+            and ip_payload is not None and ip_payload < 8
+        ):
+            return CheckResult(CheckStatus.INVALID, "declared IPv4 payload shorter than the 8-byte UDP header")
 
         if original is None:
             return CheckResult(CheckStatus.INCOMPLETE, "packet length unknown")
@@ -552,12 +575,15 @@ class PacketAnalyzer:
 
         if offset is None or more_fragments is None:
             return CheckResult(CheckStatus.INCOMPLETE, "IP fragmentation data not available")
-        
+
         if not is_int(offset) or not 0 <= offset <= MAX_FRAGMENT_OFFSET:
             return CheckResult(CheckStatus.INVALID, f"fragment offset out of range 0-{MAX_FRAGMENT_OFFSET}")
-        
+
         if not isinstance(more_fragments, bool):
             return CheckResult(CheckStatus.INVALID, "ip_more_fragments is not boolean")
+
+        if (packet.ip_version == 4 and (offset > 0 or more_fragments) and self.ip_payload_available(packet) == 0):
+            return CheckResult(CheckStatus.INVALID, "IPv4 fragment has zero declared payload length")
 
         if packet.ip_version == 6 and present is False and (offset > 0 or more_fragments):
             return CheckResult(CheckStatus.INVALID, "fragmentation contradicts absent IPv6 Fragment header")

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from firewall.schemas.flow import FlowKey
+from firewall.schemas.flow import FlowDirection, FlowKey, TCPState
 from firewall.schemas.packet_analysis import CheckResult
 
 # --- FLOW FINALIZATION ---
@@ -48,3 +48,8 @@ class FlowAnalysis:
 
     # packet_count_consistency, byte_count_consistency, duration_validity
     checks: dict[str, CheckResult]
+    tcp_state: TCPState = TCPState.NEW
+    tcp_initiator: FlowDirection | None = None
+    tcp_state_anomalies: int = 0
+    handshake_observed: bool = False
+    tcp_reset_observed: bool = False

@@ -1,7 +1,10 @@
+from dataclasses import replace
+
 from firewall.engine.policy_config import (
     CaptureContext,
     FlowLimits,
     ICMPSelector,
+    IPRestriction,
     PolicyConfig,
     PortRestriction,
     ServiceRule,
@@ -132,4 +135,138 @@ def demo_profile() -> PolicyConfig:
         capture_context=CaptureContext.LAN,
         boundary_source_networks=None,
         local_subnets=(LAN_NETWORK,),
+    )
+
+def custom_profile(
+    service_rules: tuple[ServiceRule, ...],
+    local_subnets: tuple[str, ...],
+    *,
+    capture_context: CaptureContext = CaptureContext.LAN,
+    blocked_source_ports: tuple[PortRestriction, ...] = (),
+    blocked_destination_ports: tuple[PortRestriction, ...] = (),
+    blocked_networks: tuple[IPRestriction, ...] = (),
+    boundary_source_networks: tuple[str, ...] | None = None,
+    flow_limits: FlowLimits | None = None,
+    window_limits: WindowLimits | None = None,
+    size_limits: SizeLimits | None = None,
+    block_fragments: bool = True,
+) -> PolicyConfig:
+
+    # reuse the demo baseline
+    base = demo_profile()
+
+    config = dict(
+        service_rules=service_rules,
+        local_subnets=local_subnets,
+        capture_context=capture_context,
+        blocked_source_ports=blocked_source_ports,
+        blocked_destination_ports=blocked_destination_ports,
+        blocked_networks=blocked_networks,
+        boundary_source_networks=boundary_source_networks,
+        block_fragments=block_fragments,
+    )
+
+    if flow_limits is not None:
+        config["flow_limits"] = flow_limits
+
+    if window_limits is not None:
+        config["window_limits"] = window_limits
+
+    if size_limits is not None:
+        config["size_limits"] = size_limits
+
+    return replace(base, **config)
+
+
+def example_profile() -> PolicyConfig:
+    return custom_profile(
+        local_subnets=("192.168.1.0/24",),
+        service_rules=(
+            ServiceRule(
+                rule_id="ALLOW_HOME_WEB",
+                protocol="TCP",
+                source_networks=("192.168.1.0/24",),
+                destination_networks=("0.0.0.0/0",),
+                destination_ports=(80, 443),
+                icmp_selectors=(),
+                allow_replies=True,
+            ),
+        ),
+    )
+
+# --- SYNTHETIC TEST PROFILE ---
+
+def test_profile() -> PolicyConfig:
+
+    test_network = "192.168.10.0/24"
+
+    return custom_profile(
+        local_subnets=(test_network,),
+
+        service_rules=(
+            # TCP web and synthetic port scans
+            ServiceRule(
+                rule_id="TEST_ALLOW_TCP",
+                protocol="TCP",
+                source_networks=(test_network,),
+                destination_networks=(test_network,),
+                destination_ports=(80, *range(1000, 1012)),
+                icmp_selectors=(),
+                allow_replies=True,
+            ),
+
+            # UDP requests and synthetic port scans
+            ServiceRule(
+                rule_id="TEST_ALLOW_UDP",
+                protocol="UDP",
+                source_networks=(test_network,),
+                destination_networks=(test_network,),
+                destination_ports=(5353, *range(1000, 1012)),
+                icmp_selectors=(),
+                allow_replies=True,
+            ),
+
+            # ICMP Echo Request
+            ServiceRule(
+                rule_id="TEST_ALLOW_ICMP",
+                protocol="ICMP",
+                source_networks=(test_network,),
+                destination_networks=(test_network,),
+                destination_ports=None,
+                icmp_selectors=(
+                    ICMPSelector(type=8, code=0),
+                ),
+            ),
+        ),
+
+        flow_limits=FlowLimits(
+            max_packets_per_second=10000.0,
+            max_bytes_per_second=10000000.0,
+            max_duration=300.0,
+            max_flow_bytes=60000,
+        ),
+
+        window_limits=WindowLimits(
+            packet_flood_window=2.0,
+            packet_flood_max=30,
+
+            syn_flood_window=2.0,
+            syn_flood_max=20,
+
+            echo_flood_window=2.0,
+            echo_flood_max=20,
+
+            port_scan_window=2.0,
+            port_scan_max_ports=10,
+
+            udp_port_scan_window=2.0,
+            udp_port_scan_max_ports=10,
+
+            host_scan_window=2.0,
+            host_scan_max_hosts=10,
+
+            small_packet_window=2.0,
+            small_packet_max=20,
+            small_packet_max_size=80,
+        ),
     )

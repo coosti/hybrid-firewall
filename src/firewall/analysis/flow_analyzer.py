@@ -311,6 +311,7 @@ class FlowAnalyzer:
         flow.previous_timestamp = timestamp
 
         if flow.key.transport_protocol == "TCP":
+            flow.update_tcp_state(packet, direction)
             flags = tcp_flag_names(packet.tcp_flags)
 
             if "SYN" in flags:
@@ -376,6 +377,11 @@ class FlowAnalyzer:
                 syn_count=flow.syn_count,
                 fin_count=flow.fin_count,
                 rst_count=flow.rst_count,
+                tcp_state=flow.tcp_state,
+                tcp_initiator=flow.tcp_initiator,
+                tcp_state_anomalies=flow.tcp_state_anomalies,
+                handshake_observed=flow.handshake_observed,
+                tcp_reset_observed=flow.tcp_reset_observed,
                 finalization_reason=reason,
                 checks=self.checks(flow, duration),
             )
