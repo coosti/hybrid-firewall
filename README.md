@@ -7,7 +7,7 @@ The two analysis levels are:
 - **Packet analysis:** examines individual packet information, including IP addresses, protocols, ports, and header consistency.
 - **Flow analysis:** tracks bidirectional flows and collects aggregate characteristics, including packet counts, transferred bytes, duration, and communication rates.
 
-Analysis runs **locally and offline** on previously captured network traffic stored in PCAP or PCAPNG files. ALLOW/DROP decisions classify the captured traffic; they do not block packets on a live network.
+Analysis runs **locally and offline** on previously captured network traffic stored in PCAP or PCAPNG files, classifying the captured traffic.
 
 The **Policy Engine** applies configurable rules to packet information, flow statistics, and events within time windows to produce an ALLOW/DROP decision and the findings that explain it.
 
