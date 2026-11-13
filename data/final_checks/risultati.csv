@@ -1,0 +1,22 @@
+id_relazione,file,profilo,pacchetti,allow,drop,regole_principali_drop,findings,sha256
+1,01_rate_basso.pcap,test2,15,15,0,{},"{""TEST_UDP_IPV4"": 15}",f441365a982d9d6bcc661bff7eecee60e6d446d38946500b228c370a9f80b4fd
+2,02_rate_alto.pcap,test2,900,0,900,"{""FLOW_PACKET_RATE"": 900}","{""FLOW_PACKET_RATE"": 900, ""FLOW_PEAK_PACKET_RATE"": 900, ""TEST_UDP_IPV4"": 900}",54052174bf7e5a70514257e74a8af6ce07f00e838fd99c59959f4f580ee5a26b
+3,03_byte_rate_alto.pcap,test2,60,0,60,"{""FLOW_BYTE_RATE"": 60}","{""FLOW_BYTE_RATE"": 60, ""TEST_UDP_IPV4"": 60}",41fc42ff9499c7088f141b1b778210379c748a4fc925f5aa56eb88fa43af7e36
+4,04_rate_multi_flow.pcap,test2,300,300,0,{},"{""TEST_UDP_IPV4"": 300}",7134760fe5faeb65541c4bd54c9909794ea9dfa8437996fb44b196db8fb207d2
+5,05_duration_long.pcap,test2,305,0,305,"{""FLOW_DURATION"": 305}","{""FLOW_DURATION"": 305, ""TEST_TCP_IPV4"": 304}",83ede69d0003ca4d50be65b8c7588e45630b54792241ae7069d5c83d48fff3f9
+6,06_duration_short.pcap,test2,10,10,0,{},"{""TEST_TCP_IPV4"": 10}",580a929e568d44c09a0d1688dd10e512ab33596fddbda0905aeae00d096eb6c5
+7,07_inactivity_vs_duration.pcap,test2,6,6,0,{},"{""TEST_TCP_IPV4"": 6}",c09237822e86b4c3065c3817f5a417e07d4320a76f11347d687a5466845c3a6e
+8,08_ipv6_regular.pcap,test2,4,4,0,{},"{""TEST_TCP_IPV6"": 3, ""TEST_UDP_IPV6"": 1}",e3843e7c4773a2bfb84456afa649e32bdd0525598c3326088198ab399777b5ac
+9,09_ipv6_extension.pcap,test2,1,1,0,{},"{""TEST_UDP_IPV6"": 1}",6adfaba7e0f42ea93df477c55bffee732448dfc7a75a80064ad9e0528cf24205
+10,10_ipv4_fragments_valid.pcap,test2,4,0,4,"{""IP_FRAGMENT"": 4}","{""IP_FRAGMENT"": 4, ""TEST_UDP_IPV4"": 1}",c0d4f606b19a527d7e2f9fe44fc860bab8e458fd54011ba7b9e5c4974e29995b
+11,11_ipv4_fragment_inconsistent.pcap,test2,1,0,1,"{""structural.ip_fragmentation_consistency"": 1}","{""IP_FRAGMENT"": 1, ""structural.ip_fragmentation_consistency"": 1}",22378720ae6c1e5a5326e4430ea4612898e461194d7171a6a0c7211313b92657
+12,12_ipv6_fragments.pcap,test2,2,0,2,"{""IP_FRAGMENT"": 2}","{""IP_FRAGMENT"": 2, ""TEST_UDP_IPV6"": 1}",9f438f4658b163474bf847600128dafec6fabe6d875a8330dc4b653a30cd2a65
+13,13_tunnel_ipv4_in_ipv4.pcap,test2,1,0,1,"{""UNSUPPORTED_TUNNEL"": 1}","{""UNSUPPORTED_TUNNEL"": 1}",8af0cb331754f14382efb9c37b13319ecbaa215ae916f5956a3a633447e25244
+14,14_tunnel_ipv6_in_ipv4.pcap,test2,1,0,1,"{""UNSUPPORTED_TUNNEL"": 1}","{""UNSUPPORTED_TUNNEL"": 1}",e0dbfe2f60db796a8c638a1c64e4dec1419e4beb8774ac3333a13cd6ca5caf73
+15,15_capture_truncated_header.pcap,test2,1,0,1,"{""DEFAULT_DENY"": 1}","{""DEFAULT_DENY"": 1}",31f474918bd44cc9b155ad3aeec08d7b261a257dd3f2e59d3745b250e4cc0320
+16,16_capture_truncated_payload.pcap,test2,1,1,0,{},"{""TEST_UDP_IPV4"": 1}",a5083a2a722eef6f6568f35d5196a53d15db79712b29a65f98591f8ba05123dc
+17,18_tcp_handshake_valid.pcap,test2,4,4,0,{},"{""TEST_TCP_IPV4"": 4}",5928c21362c6d6aa63457fbb0d52940d480bba19e7d6e1a9c3c28fdf3d4610ff
+18,19_tcp_handshake_missing_synack.pcap,test2,3,3,0,{},"{""TCP_HANDSHAKE_INCOMPLETE"": 3, ""TEST_TCP_IPV4"": 3}",48bd3da8d7faa655d8f2b51847b4d9c9e4b3a6462ef2d4bea10bd01983f34f79
+19,20_tcp_handshake_wrong_order.pcap,test2,3,3,0,{},"{""TCP_HANDSHAKE_INCOMPLETE"": 3, ""TCP_STATE_ANOMALY"": 3, ""TEST_TCP_IPV4"": 3}",21c202170ab563aff70f522bf6f6e1ed55daeb44b8c5884dfdcf9042c91f98b4
+20,21_tcp_handshake_syn_only.pcap,test2,2,2,0,{},"{""TCP_HANDSHAKE_INCOMPLETE"": 2, ""TEST_TCP_IPV4"": 2}",e6c8a7feb2892f5bac6cbc4a21f8e0b60690b1914b9eb2004ccb6d6474ed8f00
+21,22_tcp_high_rate_after_handshake.pcap,test2,903,0,903,"{""FLOW_PACKET_RATE"": 903}","{""FLOW_PACKET_RATE"": 903, ""FLOW_PEAK_PACKET_RATE"": 903, ""TEST_TCP_IPV4"": 902}",49526184ecf7e36f64dafc6717e7610337abb147e530bafdc0e68b0c78646ccd

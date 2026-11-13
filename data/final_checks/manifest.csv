@@ -1,0 +1,22 @@
+file,packets,scenario,atteso_con_parametri_predefiniti
+01_rate_basso.pcap,15,"UDP lento, stesso flow","ALLOW; 15 pacchetti, sotto il minimo per valutare il rate"
+02_rate_alto.pcap,900,UDP stesso flow: 300 pacchetti/s per 3 s,DROP atteso per FLOW_PACKET_RATE
+03_byte_rate_alto.pcap,60,UDP 20 pacchetti/s con molti byte,DROP per FLOW_BYTE_RATE
+04_rate_multi_flow.pcap,300,Burst UDP su più flow separati,ALLOW; un pacchetto per flow
+05_duration_long.pcap,305,Handshake + traffico TCP continuo per oltre 300 s,DROP per FLOW_DURATION; handshake osservato
+06_duration_short.pcap,10,Handshake completo + TCP breve,ALLOW; handshake osservato
+07_inactivity_vs_duration.pcap,6,Due handshake sulla stessa 5-tupla separati da lungo silenzio,ALLOW; due flow distinti per inattività
+08_ipv6_regular.pcap,4,Handshake TCP IPv6 + UDP IPv6,ALLOW; handshake TCP completo e servizi IPv6 autorizzati
+09_ipv6_extension.pcap,1,IPv6 con header Hop-by-Hop e UDP,ALLOW; catena Next Header coerente e servizio UDP autorizzato
+10_ipv4_fragments_valid.pcap,4,Frammenti IPv4 UDP validi,DROP per IP_FRAGMENT; frammenti strutturalmente coerenti
+11_ipv4_fragment_inconsistent.pcap,1,Lunghezza dichiarata IPv4 incoerente,DROP strutturale: ip_fragmentation_consistency INVALID
+12_ipv6_fragments.pcap,2,IPv6 primo e successivo frammento,DROP per IP_FRAGMENT; frammento successivo escluso dal flusso
+13_tunnel_ipv4_in_ipv4.pcap,1,Tunnel IP-in-IP con UDP interno,DROP per UNSUPPORTED_TUNNEL
+14_tunnel_ipv6_in_ipv4.pcap,1,Tunnel IPv6-in-IPv4 con UDP interno,DROP per UNSUPPORTED_TUNNEL
+15_capture_truncated_header.pcap,1,Taglio nell'intestazione IP,"DROP per DEFAULT_DENY; intestazione INCOMPLETE"
+16_capture_truncated_payload.pcap,1,Payload acquisito solo in parte,"ALLOW per TEST_UDP_IPV4; controlli di lunghezza INCOMPLETE"
+18_tcp_handshake_valid.pcap,4,SYN -> SYN+ACK -> ACK -> dati,Handshake riconosciuto come valido; dati dopo instaurazione
+19_tcp_handshake_missing_synack.pcap,3,ACK e dati senza SYN+ACK,ALLOW con finding informativo TCP_HANDSHAKE_INCOMPLETE
+20_tcp_handshake_wrong_order.pcap,3,"SYN, SYN+ACK e ACK tutti nella direzione dell'iniziatore",ALLOW con TCP_STATE_ANOMALY e TCP_HANDSHAKE_INCOMPLETE (informativi)
+21_tcp_handshake_syn_only.pcap,2,Due SYN senza risposta del server,ALLOW con finding informativo TCP_HANDSHAKE_INCOMPLETE
+22_tcp_high_rate_after_handshake.pcap,903,Handshake regolare + 300 segmenti/s per 3 secondi,DROP per FLOW_PACKET_RATE; handshake osservato
